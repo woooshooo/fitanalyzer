@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout Analyzer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .bg-custom-gray {
+            background-color: #4B5563; /* Coros-like dark gray */
+        }
+        .text-custom-light {
+            color: #E5E7EB; /* Lighter gray for text */
+        }
+        
+        /* Collapsible JSON Tree Styling */
+        .json-tree {
+            list-style: none;
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        .json-tree-item {
+            padding: 0.25rem 0;
+        }
+        .json-tree details > summary {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+        }
+        .json-tree details > summary:hover {
+            color: #d1d5db;
+        }
+        .json-tree details > summary::-webkit-details-marker {
+            display: none;
+        }
+        .json-tree details > summary:before {
+            content: '▸';
+            display: inline-block;
+            margin-right: 0.5rem;
+            transform: rotate(0deg);
+            transition: transform 0.2s ease;
+        }
+        .json-tree details[open] > summary:before {
+            content: '▾';
+            transform: rotate(0deg);
+        }
+        .json-tree-key {
+            font-weight: bold;
+            color: #d1d5db;
+        }
+        .json-tree-string {
+            color: #e6c17a; /* Yellowish for strings */
+        }
+        .json-tree-number {
+            color: #61afef; /* Bluish for numbers */
+        }
+        .json-tree-boolean, .json-tree-null {
+            color: #c678dd; /* Purplish for booleans/null */
+        }
+        .code-block {
+            background-color: #1f2937;
+            color: #d1d5db;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6 md:p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl p-4 sm:p-6 md:p-8">
+        <!-- Header Section -->
+        <header class="text-center mb-6">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Workout Analyzer</h1>
+            <p class="text-sm text-gray-500 mt-1">Upload a .fit file to analyze your workout data.</p>
+        </header>
+
+        <!-- File Upload Section -->
+        <div class="mb-6">
+            <label for="fit-file-input" class="block text-sm font-medium text-gray-700 mb-2">Select a .fit file</label>
+            <div class="relative flex items-center gap-4">
+                <input type="file" id="fit-file-input" accept=".fit" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-white hover:file:bg-gray-800 transition-all duration-300 rounded-lg shadow-inner focus:outline-none focus:ring-2 focus:ring-gray-500">
+                <button id="upload-button" disabled class="bg-gray-400 text-white font-semibold py-2 px-6 rounded-full shadow-md transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    <span id="button-text">Upload</span>
+                    <div id="loading-spinner" class="hidden loading-spinner"></div>
+                </button>
+            </div>
+            <p id="status-message" class="text-sm mt-2 text-gray-500 text-center">No file selected.</p>
+        </div>
+
+        <!-- .FIT File Structure Section -->
+        <div id="fit-file-structure" class="bg-white p-6 rounded-xl shadow-lg mt-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">Anatomy of a .FIT File</h2>
+            <p class="text-sm text-gray-600 mb-4">A .FIT file is a structured binary file containing different types of messages. Here's a simplified tree-like representation of its core components:</p>
+            <ul class="space-y-4 text-sm text-gray-700">
+                <li>
+                    <div class="font-bold">1. File Header</div>
+                    <p class="text-xs text-gray-500 mt-1">Contains metadata about the file, such as its size, protocol version, and a unique identifier.</p>
+                </li>
+                <li>
+                    <div class="font-bold">2. Data Records (Messages)</div>
+                    <ul class="ml-4 space-y-2">
+                        <li>
+                            <div class="font-semibold">2a. Session Messages</div>
+                            <p class="text-xs text-gray-500 mt-1">Provides a summary of the entire activity, including total distance, total time, average heart rate, and total calories. A file typically has one session message.</p>
+                        </li>
+                        <li>
+                            <div class="font-semibold">2b. Lap Messages</div>
+                            <p class="text-xs text-gray-500 mt-1">Summarizes a single lap of the activity. It includes lap-specific data like duration, distance, and averages for that segment. This is the data we're primarily analyzing.</p>
+                        </li>
+                        <li>
+                            <div class="font-semibold">2c. Record Messages</div>
+                            <p class="text-xs text-gray-500 mt-1">Contains detailed, time-series data points captured at regular intervals. This is where you'll find data like real-time speed, cadence, and heart rate for every second of your workout.</p>
+                        </li>
+                        <li>
+                            <div class="font-semibold">2d. Event Messages</div>
+                            <p class="text-xs text-gray-500 mt-1">Marks a specific moment in the workout, such as when the timer starts, stops, or a new lap begins. The `event` and `event_type` fields are found here.</p>
+                        </li>
+                        <li>
+                            <div class="font-semibold">...and many others</div>
+                            <p class="text-xs text-gray-500 mt-1">Other message types exist for more detailed data like GPS coordinates, power metrics, and gear changes.</p>
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <div class="font-bold">3. File CRC (Footer)</div>
+                    <p class="text-xs text-gray-500 mt-1">A checksum used to verify the integrity of the file.</p>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Workout Summary and Details -->
+        <div id="workout-content" class="hidden">
+            <!-- Summary Metrics Section -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Total Distance</p>
+                    <p id="total-distance" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Avg Pace</p>
+                    <p id="avg-pace" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Avg Heart Rate</p>
+                    <p id="avg-heart-rate" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Calories</p>
+                    <p id="total-calories" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Avg Speed</p>
+                    <p id="avg-speed" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-xl shadow-inner text-center">
+                    <p class="text-sm font-medium text-gray-500">Avg Cadence</p>
+                    <p id="avg-cadence" class="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">--</p>
+                </div>
+            </div>
+
+            <!-- Detailed Metrics Section -->
+            <div class="bg-gray-100 rounded-xl shadow-inner p-4 mb-6">
+                <h3 class="text-lg font-bold text-gray-800 mb-2">Detailed Metrics</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                    <div class="text-gray-600">Max Heart Rate: <span id="max-heart-rate" class="font-semibold text-gray-800">--</span></div>
+                    <div class="text-gray-600">Min Heart Rate: <span id="min-heart-rate" class="font-semibold text-gray-800">--</span></div>
+                    <div class="text-gray-600">Max Speed: <span id="max-speed" class="font-semibold text-gray-800">--</span></div>
+                    <div class="text-gray-600">Total Ascent: <span id="total-ascent" class="font-semibold text-gray-800">--</span></div>
+                    <div class="text-gray-600">Total Descent: <span id="total-descent" class="font-semibold text-gray-800">--</span></div>
+                </div>
+            </div>
+            
+            <!-- Specific Lap Data Section -->
+            <div id="workout-segments-section" class="bg-white p-6 rounded-xl shadow-lg mt-6 hidden">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Workout Segments</h2>
+                <div class="space-y-4 text-sm text-gray-700" id="workout-segments-container">
+                    <!-- Segment data will be dynamically inserted here -->
+                </div>
+            </div>
+            
+            <!-- Raw Lap Data Section -->
+            <div id="raw-lap-data-section" class="bg-white p-6 rounded-xl shadow-lg mt-6 hidden">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Raw Lap Data</h2>
+                <p class="text-sm text-gray-600 mb-4">This is the raw JSON representation of all workout laps found in the file.</p>
+                <div class="code-block" id="raw-lap-data-container">
+                    <!-- The JSON tree for all laps will be generated here -->
+                </div>
+            </div>
+
+            <!-- Lap Filters -->
+            <div class="flex flex-wrap justify-center gap-2 sm:gap-4 mb-4">
+                <button id="filter-all" class="filter-btn bg-gray-700 text-white font-semibold py-2 px-4 rounded-full shadow-md transition-colors duration-200">All</button>
+                <button id="filter-run" class="filter-btn bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-full shadow-md transition-colors duration-200">Run</button>
+                <button id="filter-rest" class="filter-btn bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-full shadow-md transition-colors duration-200">Rest</button>
+                <button id="filter-warmup" class="filter-btn bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-full shadow-md transition-colors duration-200">Warm up</button>
+                <button id="filter-cooldown" class="filter-btn bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-full shadow-md transition-colors duration-200">Cooldown</button>
+            </div>
+
+            <!-- Workout Data Table -->
+            <div class="overflow-x-auto rounded-xl shadow-lg">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-gray-800 text-white">
+                        <tr>
+                            <th class="p-3 text-sm font-semibold">Lap</th>
+                            <th class="p-3 text-sm font-semibold text-right">Distance (km)</th>
+                            <th class="p-3 text-sm font-semibold text-right">Time</th>
+                            <th class="p-3 text-sm font-semibold text-right">Avg Pace (/km)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workout-table-body" class="bg-gray-50 divide-y divide-gray-200">
+                        <!-- Data will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Coros-like Summary at the bottom -->
+            <div class="bg-custom-gray text-custom-light rounded-xl shadow-inner mt-6 p-4">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm font-medium">Activity Time</span>
+                    <span id="activity-time-summary" class="text-xl font-bold">--</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm font-medium">Total Time</span>
+                    <span id="total-time-summary" class="text-xl font-bold">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="module">
+        import FitParser from "https://esm.sh/fit-file-parser";
+
+        const fileInput = document.getElementById('fit-file-input');
+        const uploadButton = document.getElementById('upload-button');
+        const buttonText = document.getElementById('button-text');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const statusMessage = document.getElementById('status-message');
+        const workoutContent = document.getElementById('workout-content');
+        const tableBody = document.getElementById('workout-table-body');
+        const avgPaceEl = document.getElementById('avg-pace');
+        const totalDistanceEl = document.getElementById('total-distance');
+        const avgHeartRateEl = document.getElementById('avg-heart-rate');
+        const totalCaloriesEl = document.getElementById('total-calories');
+        const avgSpeedEl = document.getElementById('avg-speed');
+        const avgCadenceEl = document.getElementById('avg-cadence');
+        const maxHeartRateEl = document.getElementById('max-heart-rate');
+        const minHeartRateEl = document.getElementById('min-heart-rate');
+        const maxSpeedEl = document.getElementById('max-speed');
+        const totalAscentEl = document.getElementById('total-ascent');
+        const totalDescentEl = document.getElementById('total-descent');
+        const activityTimeSummary = document.getElementById('activity-time-summary');
+        const totalTimeSummary = document.getElementById('total-time-summary');
+        const fitFileStructure = document.getElementById('fit-file-structure');
+        const workoutSegmentsSection = document.getElementById('workout-segments-section');
+        const workoutSegmentsContainer = document.getElementById('workout-segments-container');
+        const rawLapDataSection = document.getElementById('raw-lap-data-section');
+        const rawLapDataContainer = document.getElementById('raw-lap-data-container');
+        
+        const filterButtons = document.querySelectorAll('.filter-btn');
+        const filterAllBtn = document.getElementById('filter-all');
+        const filterRunBtn = document.getElementById('filter-run');
+        const filterRestBtn = document.getElementById('filter-rest');
+        const filterWarmupBtn = document.getElementById('filter-warmup');
+        const filterCooldownBtn = document.getElementById('filter-cooldown');
+
+        let workoutData = [];
+        let currentFilter = 'all';
+
+        // Helper function to convert seconds per kilometer to a formatted pace string
+        function secondsPerKmToPace(secondsPerKm) {
+            if (isNaN(secondsPerKm) || !isFinite(secondsPerKm)) {
+                return '--';
+            }
+            const minutes = Math.floor(secondsPerKm / 60);
+            const seconds = Math.round(secondsPerKm % 60);
+            return `${minutes}'${String(seconds).padStart(2, '0')}"/km`;
+        }
+
+        // Helper function to format time in seconds to MM:SS or HH:MM:SS with milliseconds
+        function formatTime(totalSeconds) {
+            if (isNaN(totalSeconds) || totalSeconds < 0) {
+                return '--:--';
+            }
+            const ms = Math.floor((totalSeconds % 1) * 100);
+            const seconds = Math.floor(totalSeconds % 60);
+            const minutes = Math.floor((totalSeconds / 60) % 60);
+            const hours = Math.floor(totalSeconds / 3600);
+
+            let timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            if (hours > 0) {
+                timeString = `${String(hours).padStart(2, '0')}:${timeString}`;
+            }
+            return `${timeString}.${String(ms).padStart(2, '0')}`;
+        }
+        
+        // Function to determine the workout segment type using both event_type and event fields
+        function getEventType(lap) {
+            const eventType = lap.event_type;
+            const eventName = (lap.event || '').toLowerCase();
+
+            // Based on FIT documentation, use event_type first as it's more specific.
+            // Common event_type values from the documentation and common usage:
+            const eventTypeMap = {
+                1: 'stop',
+                4: 'rest',
+                10: 'warmup',
+                11: 'cooldown',
+            };
+
+            const mappedEventType = eventTypeMap[eventType];
+            if (mappedEventType) {
+                return mappedEventType;
+            }
+
+            // Fallback to the event name string if event_type is not a known value.
+            if (eventName.includes('warmup') || eventName.includes('warm_up')) {
+                return 'warmup';
+            }
+            if (eventName.includes('rest')) {
+                return 'rest';
+            }
+            if (eventName.includes('cooldown') || eventName.includes('cool_down')) {
+                return 'cooldown';
+            }
+            // If it's a general lap or timer start/stop, categorize as 'run' for simplicity
+            if (eventName.includes('lap') || eventName.includes('start')) {
+                return 'run';
+            }
+            
+            // Default to 'run' for any other unknown or generic laps
+            return 'run';
+        }
+
+        // Function to filter and render the lap table
+        function updateLapTable() {
+            tableBody.innerHTML = '';
+            
+            const filteredData = workoutData.filter(lap => {
+                if (currentFilter === 'all') {
+                    // Show all laps regardless of their event type
+                    return true;
+                }
+                return lap.event === currentFilter;
+            });
+            
+            if (filteredData.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">No data for this filter.</td></tr>`;
+            } else {
+                filteredData.forEach((item, index) => {
+                    const row = document.createElement('tr');
+                    const baseClasses = "py-3 px-3 text-sm";
+                    row.innerHTML = `
+                        <td class="${baseClasses} text-gray-700">${item.lapName}</td>
+                        <td class="${baseClasses} text-gray-700 text-right">${item.distance.toFixed(2)}</td>
+                        <td class="${baseClasses} text-gray-700 text-right">${item.time}</td>
+                        <td class="${baseClasses} text-gray-700 font-medium text-right">${item.avgPace}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+        }
+
+        // Add a console log when the choose file button is clicked
+        fileInput.addEventListener('click', () => {
+            console.log("Choose file button clicked.");
+        });
+
+        // Enable the upload button when a file is selected and log the filename
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                uploadButton.disabled = false;
+                statusMessage.textContent = `${fileInput.files[0].name} ready to upload.`;
+                console.log(`${fileInput.files[0].name} is selected.`);
+            } else {
+                uploadButton.disabled = true;
+                statusMessage.textContent = 'No file selected.';
+            }
+        });
+
+        // Handle file upload and analysis on button click
+        uploadButton.addEventListener('click', () => {
+            // Clear the console before starting a new analysis
+            console.clear();
+
+            const file = fileInput.files[0];
+            if (!file) {
+                statusMessage.textContent = 'Please select a file first.';
+                return;
+            }
+
+            console.log("Uploading...");
+            buttonText.textContent = '';
+            loadingSpinner.classList.remove('hidden');
+            uploadButton.disabled = true;
+            statusMessage.textContent = 'Processing file...';
+            workoutContent.classList.add('hidden');
+            fitFileStructure.classList.remove('hidden'); // Show structure while loading
+            workoutSegmentsSection.classList.add('hidden'); // Hide until we have data
+            rawLapDataSection.classList.add('hidden'); // Hide until we have data
+
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                try {
+                    console.log("Analyzing...");
+                    const fitParserInstance = new FitParser({
+                        force: true,
+                        speedUnit: 'km/h',
+                        lengthUnit: 'm', // Set length unit to meters as requested
+                        elapsedRecordField: true,
+                        mode: 'both'
+                    });
+                    
+                    fitParserInstance.parse(e.target.result, (error, data) => {
+                        buttonText.textContent = 'Upload';
+                        loadingSpinner.classList.add('hidden');
+                        uploadButton.disabled = false;
+                        fitFileStructure.classList.add('hidden'); // Hide the structure tree once done
+
+                        if (error) {
+                            statusMessage.textContent = 'Error parsing file. Please ensure it is a valid .fit file.';
+                            console.error(error);
+                            return;
+                        }
+
+                        const lapsData = data.laps || [];
+                        const recordsData = data.records || [];
+                        const sessionData = data.sessions && data.sessions.length > 0 ? data.sessions[0] : null;
+
+                        // Use the last record's cumulative distance for the most accurate total
+                        let totalDistanceMeters = 0;
+                        if (recordsData.length > 0) {
+                            const lastRecord = recordsData[recordsData.length - 1];
+                            if (lastRecord.distance !== undefined) {
+                                totalDistanceMeters = lastRecord.distance;
+                            }
+                        }
+                        
+                        // Log records and laps data for debugging
+                        console.log('Raw laps data:', lapsData);
+                        console.log('Raw records data:', recordsData);
+
+                        // Convert total distance to kilometers
+                        const totalDistanceKm = totalDistanceMeters / 1000;
+                        
+                        // Calculate average cadence from records data
+                        let totalCadence = 0;
+                        let cadenceCount = 0;
+                        if (recordsData.length > 0) {
+                            recordsData.forEach(record => {
+                                if (record.cadence !== undefined && record.cadence > 0) {
+                                    totalCadence += record.cadence;
+                                    cadenceCount++;
+                                }
+                            });
+                        }
+                        const avgCadence = cadenceCount > 0 ? (totalCadence / cadenceCount) * 2 : null; // Multiply by 2 for steps per minute
+
+                        // Extract and display all relevant session data
+                        if (sessionData) {
+                            totalDistanceEl.textContent = `${totalDistanceKm.toFixed(2)} km`;
+                            avgPaceEl.textContent = secondsPerKmToPace((sessionData.total_timer_time / totalDistanceKm));
+                            avgHeartRateEl.textContent = `${sessionData.avg_heart_rate ? sessionData.avg_heart_rate.toFixed(0) : '--'} bpm`;
+                            totalCaloriesEl.textContent = `${sessionData.total_calories ? sessionData.total_calories.toFixed(0) : '--'} cal`;
+                            avgSpeedEl.textContent = `${sessionData.avg_speed ? (sessionData.avg_speed * 3.6).toFixed(2) : '--'} km/h`;
+                            // Use the calculated average cadence from records
+                            avgCadenceEl.textContent = `${avgCadence ? avgCadence.toFixed(0) : '--'} spm`;
+                            maxHeartRateEl.textContent = `${sessionData.max_heart_rate ? sessionData.max_heart_rate.toFixed(0) : '--'} bpm`;
+                            minHeartRateEl.textContent = `${sessionData.min_heart_rate ? sessionData.min_heart_rate.toFixed(0) : '--'} bpm`;
+                            maxSpeedEl.textContent = `${sessionData.max_speed ? (sessionData.max_speed * 3.6).toFixed(2) : '--'} km/h`;
+                            totalAscentEl.textContent = `${sessionData.total_ascent ? sessionData.total_ascent.toFixed(2) : '--'} m`;
+                            totalDescentEl.textContent = `${sessionData.total_descent ? sessionData.total_descent.toFixed(2) : '--'} m`;
+                            
+                            activityTimeSummary.textContent = formatTime(sessionData.total_timer_time);
+                            totalTimeSummary.textContent = formatTime(sessionData.total_elapsed_time);
+
+                            statusMessage.textContent = 'File successfully analyzed!';
+                            workoutContent.classList.remove('hidden');
+                            
+                            if (lapsData.length > 0) {
+                                workoutData = lapsData.map((lap, index) => {
+                                    const timeInSeconds = lap.total_elapsed_time || 0;
+                                    let distanceKm = (lap.total_distance / 1000) || 0;
+                                    const avgPaceSecondsPerKm = (distanceKm > 0) ? (timeInSeconds / distanceKm) : Infinity;
+                                    
+                                    // Use the new, more robust function to determine the event type
+                                    const eventType = getEventType(lap);
+                                    
+                                    return {
+                                        lapName: `${eventType.charAt(0).toUpperCase() + eventType.slice(1)} Lap ${index + 1}`,
+                                        distance: distanceKm,
+                                        time: formatTime(timeInSeconds),
+                                        timeSeconds: timeInSeconds,
+                                        avgPace: secondsPerKmToPace(avgPaceSecondsPerKm),
+                                        event: eventType
+                                    };
+                                });
+                                
+                                // Display specific workout segments as requested
+                                displayWorkoutSegments(data.laps);
+                                workoutSegmentsSection.classList.remove('hidden');
+                                
+                                // Display all raw laps data in the new section
+                                displayRawLapsData(data.laps);
+                                rawLapDataSection.classList.remove('hidden');
+
+                            } else {
+                                workoutData = [];
+                            }
+
+                            updateLapTable();
+                        } else {
+                            statusMessage.textContent = 'Session data not found in file.';
+                        }
+
+                    });
+                } catch (e) {
+                    buttonText.textContent = 'Upload';
+                    loadingSpinner.classList.add('hidden');
+                    uploadButton.disabled = false;
+                    statusMessage.textContent = 'An unexpected error occurred. Please try a different file.';
+                    console.error(e);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+        
+        // Recursive function to create a collapsible JSON tree
+        function createJsonTree(data) {
+            const list = document.createElement('ul');
+            list.classList.add('json-tree');
+
+            for (const key in data) {
+                if (data.hasOwnProperty(key)) {
+                    const value = data[key];
+                    const item = document.createElement('li');
+                    item.classList.add('json-tree-item');
+
+                    // Check if the value is a nested object or array that should be collapsible
+                    if (typeof value === 'object' && value !== null && !(value instanceof Date)) {
+                        const details = document.createElement('details');
+                        const summary = document.createElement('summary');
+                        
+                        const keySpan = document.createElement('span');
+                        keySpan.classList.add('json-tree-key');
+                        keySpan.textContent = `"${key}":`;
+
+                        const typeHint = document.createElement('span');
+                        const isArray = Array.isArray(value);
+                        typeHint.textContent = isArray ? ` [Array (${Object.keys(value).length})]` : ` {Object}`;
+                        
+                        summary.appendChild(keySpan);
+                        summary.appendChild(typeHint);
+                        
+                        details.appendChild(summary);
+                        details.appendChild(createJsonTree(value)); // Recursively call for nested data
+                        item.appendChild(details);
+                    } else {
+                        // Handle primitive types and Date objects
+                        const keySpan = document.createElement('span');
+                        keySpan.classList.add('json-tree-key');
+                        keySpan.textContent = `"${key}": `;
+
+                        const valueSpan = document.createElement('span');
+                        let valueStr;
+                        if (value instanceof Date) {
+                            valueSpan.classList.add('json-tree-string');
+                            valueStr = `"${value.toISOString()}"`; // Format Date objects as ISO strings
+                        } else if (typeof value === 'string') {
+                            valueSpan.classList.add('json-tree-string');
+                            valueStr = `"${value}"`;
+                        } else if (typeof value === 'number') {
+                            valueSpan.classList.add('json-tree-number');
+                            valueStr = value.toString();
+                        } else if (typeof value === 'boolean' || value === null) {
+                            valueSpan.classList.add('json-tree-boolean');
+                            valueStr = value === null ? 'null' : value.toString();
+                        } else {
+                            // Fallback for any other types
+                            valueStr = JSON.stringify(value);
+                        }
+                        
+                        valueSpan.textContent = valueStr;
+                        item.appendChild(keySpan);
+                        item.appendChild(valueSpan);
+                    }
+                    list.appendChild(item);
+                }
+            }
+            return list;
+        }
+
+        // Function to display specific workout segments
+        function displayWorkoutSegments(laps) {
+            workoutSegmentsContainer.innerHTML = ''; // Clear previous content
+            
+            const segmentTypes = ['warmup', 'run', 'rest', 'cooldown'];
+            const segmentsFound = {};
+
+            laps.forEach(lap => {
+                const eventType = getEventType(lap);
+                if (segmentTypes.includes(eventType) && !segmentsFound[eventType]) {
+                    segmentsFound[eventType] = lap;
+                }
+            });
+
+            segmentTypes.forEach(type => {
+                const lap = segmentsFound[type];
+                const lapElement = document.createElement('div');
+                lapElement.classList.add('bg-gray-100', 'p-4', 'rounded-xl', 'shadow-inner');
+
+                if (lap) {
+                    const header = document.createElement('h3');
+                    header.className = 'font-bold text-lg capitalize mb-2 text-gray-800';
+                    header.textContent = `${type} Segment`;
+                    
+                    const codeBlock = document.createElement('div');
+                    codeBlock.classList.add('code-block');
+                    codeBlock.appendChild(createJsonTree(lap));
+
+                    lapElement.appendChild(header);
+                    lapElement.appendChild(codeBlock);
+                } else {
+                    lapElement.innerHTML = `
+                        <div class="font-bold text-lg capitalize">${type} Segment</div>
+                        <p class="text-sm text-gray-500 mt-2">No segment of this type found in the file.</p>
+                    `;
+                }
+                workoutSegmentsContainer.appendChild(lapElement);
+            });
+        }
+        
+        // New function to display all raw laps data
+        function displayRawLapsData(laps) {
+            rawLapDataContainer.innerHTML = '';
+            
+            // Create a parent list for all laps
+            const lapsList = document.createElement('ul');
+            lapsList.classList.add('json-tree');
+
+            laps.forEach((lap, index) => {
+                const lapItem = document.createElement('li');
+                lapItem.classList.add('json-tree-item');
+
+                // Create a collapsible details element for each lap
+                const lapDetails = document.createElement('details');
+                const lapSummary = document.createElement('summary');
+                lapSummary.className = 'font-bold text-lg cursor-pointer text-white';
+                
+                const type = getEventType(lap);
+                lapSummary.innerHTML = `<span class="json-tree-key">Lap ${index + 1}</span>: <span class="text-gray-400 capitalize">${type}</span>`;
+                
+                const lapTree = createJsonTree(lap);
+                lapDetails.appendChild(lapSummary);
+                lapDetails.appendChild(lapTree);
+                
+                lapItem.appendChild(lapDetails);
+                lapsList.appendChild(lapItem);
+            });
+
+            if (laps.length > 0) {
+                rawLapDataContainer.appendChild(lapsList);
+            } else {
+                rawLapDataContainer.innerHTML = '<p class="text-sm text-gray-500">No lap data found in the file.</p>';
+            }
+        }
+
+
+        // Add event listeners for the filter buttons
+        filterButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                const newFilter = e.target.id.split('-')[1];
+
+                // Update button styles to show the active filter
+                filterButtons.forEach(btn => {
+                    if (btn.id === `filter-${newFilter}`) {
+                        btn.classList.add('bg-gray-700', 'text-white');
+                        btn.classList.remove('bg-gray-200', 'text-gray-700');
+                    } else {
+                        btn.classList.add('bg-gray-200', 'text-gray-700');
+                        btn.classList.remove('bg-gray-700', 'text-white');
+                    }
+                });
+
+                currentFilter = newFilter;
+                updateLapTable();
+            });
+        });
+
+        // Initially hide content until a file is uploaded
+        window.onload = () => {
+             workoutContent.classList.add('hidden');
+             fitFileStructure.classList.remove('hidden');
+        };
+    </script>
+</body>
+</html>
